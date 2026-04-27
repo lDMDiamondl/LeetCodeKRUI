@@ -74,7 +74,9 @@ const REGEX_TRANSLATIONS = [
     { pattern: /^Solved\s+([\d,]+)\s+problems?$/i, replacement: '$1문제 해결' },
     { pattern: /^(\d+)\s+Levels?$/i, replacement: '$1 단계' },
     { pattern: /^A verification code has (?:been )?sent to (.+?)\.?$/i, replacement: '인증 코드가 $1로 전송되었습니다.' },
-    { pattern: /^(\d+)\s+Selected$/i, replacement: '$1개 선택됨' }
+    { pattern: /^(\d+)\s+Selected$/i, replacement: '$1개 선택됨' },
+    { pattern: /^Case\s+(\d+)$/i, replacement: '케이스 $1' },
+    { pattern: /^submitted at$/i, replacement: '제출 시간:' }
 ];
 
 chrome.storage.local.get(['translationEnabled'], (result) => {
@@ -226,6 +228,78 @@ function handleSpecialUIPatterns(element) {
 
     if (handleBannerTranslations(element, text)) return true;
 
+    const beatsMatch = text.match(/Beats\s*([\d.]+)%/i);
+    if (beatsMatch && text.length < 150) {
+        let hasChildWithSameBeats = false;
+        for (let i = 0; i < element.childNodes.length; i++) {
+            if (element.childNodes[i].nodeType === 1 && element.childNodes[i].textContent.match(/Beats\s*([\d.]+)%/i)) {
+                hasChildWithSameBeats = true;
+                break;
+            }
+        }
+        if (!hasChildWithSameBeats) {
+            const percentage = parseFloat(beatsMatch[1]);
+            if (!isNaN(percentage)) {
+                const topPercentage = (100 - percentage).toFixed(2);
+                const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT, null, false);
+                let currNode;
+                while ((currNode = walker.nextNode())) {
+                    if (/Beats/i.test(currNode.nodeValue)) {
+                        currNode.nodeValue = currNode.nodeValue.replace(/Beats/i, "상위 ");
+                    }
+                    if (currNode.nodeValue.includes(beatsMatch[1] + "%")) {
+                        currNode.nodeValue = currNode.nodeValue.replace(beatsMatch[1] + "%", `${topPercentage}%`);
+                    } else if (currNode.nodeValue.includes(beatsMatch[1])) {
+                        currNode.nodeValue = currNode.nodeValue.replace(beatsMatch[1], topPercentage);
+                    }
+                }
+                return true;
+            }
+        }
+    }
+
+    if (text.includes("Your code is saved to local") && text.includes("enable cloud saving") && text.length < 200) {
+        const linkNode = element.querySelector('a');
+        if (linkNode && linkNode.textContent.includes("upgrade to Premium")) {
+            const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT, null, false);
+            let currNode;
+            while ((currNode = walker.nextNode())) {
+                if (currNode.nodeValue.includes("Your code is saved to local")) {
+                    currNode.nodeValue = "작성한 코드가 로컬에 저장되었습니다. 클라우드 저장을 활성화하려면";
+                } else if (currNode.nodeValue.includes("to enable cloud saving")) {
+                    currNode.nodeValue = "을 구독해 주세요.";
+                }
+            }
+            linkNode.textContent = "프리미엄";
+            return true;
+        }
+    }
+
+    const earnMatch = text.match(/^Earn\s+(.+)$/i);
+    if (earnMatch && text.length < 50) {
+        let hasChildWithSameEarn = false;
+        for (let i = 0; i < element.childNodes.length; i++) {
+            if (element.childNodes[i].nodeType === 1 && element.childNodes[i].textContent.trim().match(/^Earn\s+(.+)$/i)) {
+                hasChildWithSameEarn = true;
+                break;
+            }
+        }
+        if (!hasChildWithSameEarn) {
+            let earnRemoved = false;
+            const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT, null, false);
+            let currNode;
+            while ((currNode = walker.nextNode())) {
+                if (/^Earn\s*/i.test(currNode.nodeValue.trim())) {
+                    currNode.nodeValue = currNode.nodeValue.replace(/Earn\s*/i, "");
+                    earnRemoved = true;
+                }
+            }
+            if (earnRemoved) {
+                element.appendChild(document.createTextNode(" 획득하기"));
+            }
+        }
+    }
+
     return false;
 }
 
@@ -237,6 +311,18 @@ function hasChildWithSameText(element, text) {
 }
 
 function handleBannerTranslations(element, text) {
+    if (text === "For additional LeetCoins, please refer to this discuss post.") {
+        const linkNode = element.querySelector('a');
+        if (linkNode && linkNode.textContent.trim() === "this") {
+            const clone = linkNode.cloneNode(true);
+            clone.textContent = "해당 게시글";
+            element.textContent = "추가 LeetCoin 관련 상세 내용은 ";
+            element.appendChild(clone);
+            element.appendChild(document.createTextNode("을 확인하세요."));
+            return true;
+        }
+    }
+
     // Terms of service
     if (text.startsWith("By continuing, you agree to") && text.length < 150) {
         const links = element.querySelectorAll('a');
@@ -277,6 +363,19 @@ function handleBannerTranslations(element, text) {
             }
         }
         element.appendChild(document.createTextNode("에서 삭제 완료!"));
+        return true;
+    }
+
+    if (text.startsWith("Are you sure you want to redeem a") && text.includes("LeetCoins?")) {
+        const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT, null, false);
+        let node;
+        while ((node = walker.nextNode())) {
+            const val = node.nodeValue.trim();
+            if (val.startsWith("Are you sure")) node.nodeValue = " ";
+            else if (val === "for") node.nodeValue = " 을(를) ";
+            else if (val.includes("LeetCoins?")) node.nodeValue = node.nodeValue.replace(/(LeetCoins?)\?/i, "$1으로 교환하시겠습니까?");
+            else translateTextNode(node);
+        }
         return true;
     }
 
